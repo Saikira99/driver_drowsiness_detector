@@ -2,9 +2,9 @@ services:
   - type: web
     name: driver-drowsiness-detector
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "streamlit run app.py --server.port $PORT --server.address 0.0.0.0"
     plan: free
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.10
+    runtime: python
+    pythonVersion: 3.10.13
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    autoDeploy: true

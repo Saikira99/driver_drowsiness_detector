@@ -2,7 +2,3 @@ opencv-python-headless
 streamlit
 streamlit-webrtc
 mediapipe
-scipy
-playsound==1.2.2
-av
-numpy
