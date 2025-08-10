@@ -1,69 +1,71 @@
+import cv2
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import av
-import cv2
-import mediapipe as mp
-from scipy.spatial import distance as dist
-import numpy as np
-import playsound
-import threading
+import time
 
-# EAR calculation
-def eye_aspect_ratio(eye):
-    A = dist.euclidean(eye[1], eye[5])
-    B = dist.euclidean(eye[2], eye[4])
-    C = dist.euclidean(eye[0], eye[3])
-    ear = (A + B) / (2.0 * C)
-    return ear
+# Load Haar Cascade model for face detection
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
-# Mediapipe face mesh
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, max_num_faces=1)
+# App Title
+st.set_page_config(page_title="Face Detection", page_icon="📷")
+st.title("📷 Real-Time Face Detection (OpenCV + Streamlit)")
 
-EAR_THRESHOLD = 0.25
-EAR_CONSEC_FRAMES = 20
-alarm_on = False
-COUNTER = 0
+# Sidebar controls
+st.sidebar.header("Settings")
+show_fps = st.sidebar.checkbox("Show FPS", value=True)
+play_alert = st.sidebar.checkbox("Play Sound on Detection", value=True)
 
-def sound_alarm():
-    playsound.playsound("alarm.mp3")
+# JavaScript sound alert
+alert_sound = """
+<script>
+function playAlert() {
+    var audio = new Audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3");
+    audio.play();
+}
+</script>
+"""
 
-class VideoProcessor(VideoTransformerBase):
+# Face detection transformer
+class FaceDetectionTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.last_time = time.time()
+        self.fps = 0
+        self.face_count = 0
+
     def transform(self, frame):
-        global COUNTER, alarm_on
         img = frame.to_ndarray(format="bgr24")
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(img_rgb)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                h, w, _ = img.shape
-                landmarks = [(int(p.x * w), int(p.y * h)) for p in face_landmarks.landmark]
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
+        self.face_count = len(faces)
 
-                left_eye = [landmarks[i] for i in [33, 160, 158, 133, 153, 144]]
-                right_eye = [landmarks[i] for i in [362, 385, 387, 263, 373, 380]]
+        # Draw rectangles
+        for (x, y, w, h) in faces:
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-                leftEAR = eye_aspect_ratio(left_eye)
-                rightEAR = eye_aspect_ratio(right_eye)
-                ear = (leftEAR + rightEAR) / 2.0
-
-                if ear < EAR_THRESHOLD:
-                    COUNTER += 1
-                    if COUNTER >= EAR_CONSEC_FRAMES:
-                        if not alarm_on:
-                            alarm_on = True
-                            threading.Thread(target=sound_alarm).start()
-                        cv2.putText(img, "DROWSINESS ALERT!", (10, 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
-                else:
-                    COUNTER = 0
-                    alarm_on = False
-
-                # Draw eyes
-                for (x, y) in left_eye + right_eye:
-                    cv2.circle(img, (x, y), 2, (0, 255, 0), -1)
+        # FPS calculation
+        if show_fps:
+            now = time.time()
+            self.fps = 1 / (now - self.last_time)
+            self.last_time = now
+            cv2.putText(img, f"FPS: {self.fps:.1f}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
         return img
 
-st.title("🚗 Driver Drowsiness Detection")
-webrtc_streamer(key="example", video_processor_factory=VideoProcessor)
+# Start WebRTC streamer
+ctx = webrtc_streamer(
+    key="face-detection",
+    video_transformer_factory=FaceDetectionTransformer,
+    media_stream_constraints={"video": True, "audio": False}
+)
+
+# Display detection stats
+if ctx.video_transformer:
+    st.markdown(f"**Detected Faces:** {ctx.video_transformer.face_count}")
+
+    # Play sound if face detected
+    if play_alert and ctx.video_transformer.face_count > 0:
+        st.markdown(alert_sound, unsafe_allow_html=True)
+        st.markdown("<script>playAlert()</script>", unsafe_allow_html=True)
